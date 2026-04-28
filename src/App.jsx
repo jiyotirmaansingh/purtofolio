@@ -707,7 +707,7 @@ export default function App() {
                 </h2>
               </SR>
               {[
-                {type:"B.TECH",inst:"LNCT Group of Colleges",sub:"B.Tech CSE: AI & ML",date:"2023–2027",note:"CGPA 7.8 · SGPA 8.2",status:"ONGOING",loc:"BHOPAL, M.P."},
+                {type:"B.TECH",inst:"LNCT Group of Colleges",sub:"B.Tech CSE: AI & ML",date:"2023–2027",note:"CGPA 8.04 · SGPA 9.0",status:"ONGOING",loc:"BHOPAL, M.P."},
                 {type:"XII",inst:"Ryan International School",sub:"Senior Secondary Education",date:"2023",note:null,status:"COMPLETED",loc:"BHOPAL, M.P."},
                 {type:"X",inst:"Ryan International School",sub:"Secondary Education",date:"2021",note:null,status:"COMPLETED",loc:"BHOPAL, M.P."},
               ].map((e,i)=>(
