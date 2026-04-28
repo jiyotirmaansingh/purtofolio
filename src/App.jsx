@@ -13,10 +13,6 @@ const STACK_ITEMS = [
   "Git","Raspberry Pi","Apple MPS","Folium","Ollama","VS Code","MongoDB Atlas",
 ];
 
-/* ═══════════════════════════════════════════
-   NEURAL INTRO — slim, scientific, realistic
-   Nodes tightly spaced like a real net diagram
-═══════════════════════════════════════════ */
 function NeuralIntro({ onComplete }) {
   const canvasRef = useRef(null);
   const [phase, setPhase] = useState("computing");
@@ -50,12 +46,12 @@ function NeuralIntro({ onComplete }) {
 
     const W = canvas.width, H = canvas.height;
 
-    /* Scientific deep-net architecture — slim node spacing */
+
     const LAYERS = mob
       ? [2, 4, 6, 4, 2, 1]
       : [3, 6, 9, 12, 9, 6, 3, 1];
 
-    const NODE_SPACING = mob ? 26 : 32; // tight vertical spacing (scientific look)
+    const NODE_SPACING = mob ? 26 : 32;
     const marginX = W * (mob ? 0.06 : 0.09);
     const usableW = W - marginX * 2;
     const layerX = LAYERS.map((_, i) => marginX + (i / (LAYERS.length - 1)) * usableW);
@@ -72,7 +68,6 @@ function NeuralIntro({ onComplete }) {
       }));
     });
 
-    /* Pre-build connection list with random weights */
     const conns = [];
     for (let li = 0; li < LAYERS.length - 1; li++) {
       for (const a of nodes[li]) {
@@ -112,7 +107,6 @@ function NeuralIntro({ onComplete }) {
         ctx.moveTo(c.a.x, c.a.y);
         ctx.lineTo(c.b.x, c.b.y);
         if (c.active > 0.05) {
-          // excited conn: red/orange tint
           ctx.strokeStyle = c.sign > 0
             ? `rgba(180,45,45,${alpha * 1.2})`
             : `rgba(45,80,180,${alpha * 1.2})`;
@@ -130,12 +124,12 @@ function NeuralIntro({ onComplete }) {
         s.t += s.speed;
         const cx = s.x + (s.tx - s.x) * s.t;
         const cy = s.y + (s.ty - s.y) * s.t;
-        // bright head
+
         ctx.beginPath();
         ctx.arc(cx, cy, 2.2, 0, Math.PI * 2);
         ctx.fillStyle = `rgba(230,70,70,${1 - s.t * 0.25})`;
         ctx.fill();
-        // faint trail dot
+
         const bt = Math.max(0, s.t - 0.05);
         ctx.beginPath();
         ctx.arc(s.x + (s.tx - s.x) * bt, s.y + (s.ty - s.y) * bt, 1.0, 0, Math.PI * 2);
@@ -151,11 +145,11 @@ function NeuralIntro({ onComplete }) {
         }
       }
 
-      /* Spawn */
+
       if (frame % SPAWN_RATE === 0) spawnSignal(0);
       if (frame % (SPAWN_RATE * 3) === 0) spawnSignal(Math.floor(Math.random() * (LAYERS.length - 2)));
 
-      /* ── Nodes ── */
+
       nodes.forEach((layer, li) => {
         const isOut = li === LAYERS.length - 1;
         const isIn = li === 0;
@@ -167,7 +161,7 @@ function NeuralIntro({ onComplete }) {
           const baseR = isOut ? 5.5 : isIn ? 3.5 : 2.8;
           const r = baseR + n.activation * 2.8;
 
-          // soft aura on activation
+
           if (n.activation > 0.08) {
             const grad = ctx.createRadialGradient(n.x, n.y, r * 0.5, n.x, n.y, r + 10);
             grad.addColorStop(0, `rgba(160,30,30,${n.activation * 0.22})`);
@@ -280,12 +274,6 @@ function NeuralIntro({ onComplete }) {
   );
 }
 
-/* ═══════════════════════════════
-   ADAPTIVE CURSOR
-   — dark dot on light bg (#E8E3D8 sections)
-   — light dot on dark bg (#0A0A0A sections)
-   — hidden on touch devices
-═══════════════════════════════ */
 function Cursor() {
   const dot = useRef(null);
   const ring = useRef(null);
@@ -304,7 +292,6 @@ function Cursor() {
       pos.current.x += (tgt.current.x - pos.current.x) * 0.11;
       pos.current.y += (tgt.current.y - pos.current.y) * 0.11;
 
-      /* Sample background brightness every 8 frames */
       frame++;
       if (frame % 8 === 0) {
         const el = document.elementFromPoint(tgt.current.x, tgt.current.y);
@@ -349,7 +336,7 @@ function Cursor() {
   </>);
 }
 
-/* ─── SCROLL REVEAL ─── */
+
 function SR({ children, delay=0, style={} }) {
   const ref = useRef(null);
   const [v, setV] = useState(false);
