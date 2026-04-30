@@ -18,6 +18,13 @@ function downloadResume() {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+const Haptic = {
+  tap:    () => navigator.vibrate?.(6),
+  burst:  () => navigator.vibrate?.([4, 20, 4]),
+  pop:    () => navigator.vibrate?.([8, 12, 4]),
+  done:   () => navigator.vibrate?.([10, 18, 6, 18, 14]),
+};
+
 /* ═══════════════════════════════════════════════════════
    DESIGN TOKENS — single source of truth
 ═══════════════════════════════════════════════════════ */
@@ -190,15 +197,18 @@ const STACK_ITEMS = [
 function NeuralIntro({ onComplete }) {
   const canvasRef = useRef(null);
   const mouseRef = useRef({ x: 0, y: 0 });
-  const [phase, setPhase] = useState("computing"); // computing | output | dissolve
+  const touchRef = useRef({ x: 0, y: 0 }); // ← NEW
+  const [phase, setPhase] = useState("computing");
   const [outputLines, setOutputLines] = useState([]);
   const [progress, setProgress] = useState(0);
   const rafRef = useRef(null);
   const startRef = useRef(null);
   const doneRef = useRef(false);
   const skippedRef = useRef(false);
+  const lastHapticProgress = useRef(0); // ← NEW
+  const lastFireTime = useRef(0);       // ← NEW
 
-  const DURATION = 2600; // ms — total animation time
+  const DURATION = 2600;
   const LAYERS = [3, 5, 8, 10, 8, 5, 3, 1];
   const LINES = [
     "> INIT_NEURAL_NET...",
@@ -213,13 +223,22 @@ function NeuralIntro({ onComplete }) {
     "> OUTPUT: ██ PORTFOLIO_READY ██",
   ];
 
-  // track mouse for parallax
   useEffect(() => {
-    const handler = (e) => {
-      mouseRef.current = { x: e.clientX, y: e.clientY };
+    // mouse (desktop)
+    const onMouse = (e) => { mouseRef.current = { x: e.clientX, y: e.clientY }; };
+    // touch (mobile) — also drives parallax ← NEW
+    const onTouch = (e) => {
+      const t = e.touches[0];
+      touchRef.current = { x: t.clientX, y: t.clientY };
+      mouseRef.current = { x: t.clientX, y: t.clientY };
+      Haptic.tap(); // tiny tick on every touch move ← NEW
     };
-    window.addEventListener("mousemove", handler);
-    return () => window.removeEventListener("mousemove", handler);
+    window.addEventListener("mousemove", onMouse);
+    window.addEventListener("touchmove", onTouch, { passive: true });
+    return () => {
+      window.removeEventListener("mousemove", onMouse);
+      window.removeEventListener("touchmove", onTouch);
+    };
   }, []);
 
   useEffect(() => {
@@ -237,17 +256,22 @@ function NeuralIntro({ onComplete }) {
     const W = () => canvas.width;
     const H = () => canvas.height;
 
-    // build node grid
-    const NODE_SPACING = mob ? 30 : 44;
+    // ← NEW: tighter node spacing on mobile so the network isn't fat
+    const NODE_SPACING = mob ? 22 : 44;
+    const NODE_R_BASE  = mob ? 2.2 : 3.5;
+
     const buildNodes = () => {
       const w = W(), h = H();
-      const layerSpacing = w / (LAYERS.length + 1);
-      return LAYERS.map((count, li) => {
+      // ← NEW: on mobile shrink layer count so it fits portrait
+      const activeLayers = mob
+        ? [2, 4, 6, 8, 6, 4, 2, 1]
+        : LAYERS;
+      const layerSpacing = w / (activeLayers.length + 1);
+      return activeLayers.map((count, li) => {
         const totalH = (count - 1) * NODE_SPACING;
         const startY = h / 2 - totalH / 2;
         const x = layerSpacing * (li + 1);
-        // depth: 0 = outermost (dimmed), 1 = centre (bright)
-        const depth = 1 - Math.abs(li - (LAYERS.length - 1) / 2) / ((LAYERS.length - 1) / 2);
+        const depth = 1 - Math.abs(li - (activeLayers.length - 1) / 2) / ((activeLayers.length - 1) / 2);
         return Array.from({ length: count }, (_, ni) => ({
           x, y: startY + ni * NODE_SPACING,
           baseX: x, baseY: startY + ni * NODE_SPACING,
@@ -261,7 +285,7 @@ function NeuralIntro({ onComplete }) {
 
     const buildConns = () => {
       const cs = [];
-      for (let li = 0; li < LAYERS.length - 1; li++)
+      for (let li = 0; li < nodes.length - 1; li++)
         for (const a of nodes[li])
           for (const b of nodes[li + 1])
             cs.push({ a, b, active: 0, sign: Math.random() > 0.5 ? 1 : -1, w: 0.02 + Math.random() * 0.04 });
@@ -269,18 +293,14 @@ function NeuralIntro({ onComplete }) {
     };
     let conns = buildConns();
 
-    window.addEventListener("resize", () => {
-      nodes = buildNodes();
-      conns = buildConns();
-    });
+    window.addEventListener("resize", () => { nodes = buildNodes(); conns = buildConns(); });
 
     const signals = [];
     let lastSpawn = 0;
-
     const spawnSignal = (fromLayer) => {
-      if (fromLayer >= LAYERS.length - 1) return;
+      if (fromLayer >= nodes.length - 1) return;
       const from = nodes[fromLayer][Math.floor(Math.random() * nodes[fromLayer].length)];
-      const to = nodes[fromLayer + 1][Math.floor(Math.random() * nodes[fromLayer + 1].length)];
+      const to   = nodes[fromLayer + 1][Math.floor(Math.random() * nodes[fromLayer + 1].length)];
       const conn = conns.find((c) => c.a === from && c.b === to);
       signals.push({
         x: from.x, y: from.y, tx: to.x, ty: to.y,
@@ -298,7 +318,13 @@ function NeuralIntro({ onComplete }) {
       const prog = Math.min(elapsed / DURATION, 1);
       setProgress(Math.round(prog * 100));
 
-      // parallax offset — inner layers move more
+      // ← NEW: haptic ticks at 25% / 50% / 75% milestones
+      const pct = Math.round(prog * 100);
+      if ([25, 50, 75].includes(pct) && pct !== lastHapticProgress.current) {
+        lastHapticProgress.current = pct;
+        Haptic.burst();
+      }
+
       const cx = W() / 2, cy = H() / 2;
       const mx = mouseRef.current.x - cx;
       const my = mouseRef.current.y - cy;
@@ -306,10 +332,8 @@ function NeuralIntro({ onComplete }) {
       ctx.fillStyle = "rgba(8,8,8,0.22)";
       ctx.fillRect(0, 0, W(), H());
 
-      // frontier layer advances L→R with progress
-      const frontier = Math.floor(prog * (LAYERS.length - 1));
+      const frontier = Math.floor(prog * (nodes.length - 1));
 
-      // update node positions (parallax)
       nodes.forEach((layer) =>
         layer.forEach((n) => {
           n.x = n.baseX + mx * 0.016 * n.depth;
@@ -317,15 +341,13 @@ function NeuralIntro({ onComplete }) {
         })
       );
 
-      // spawn signals strictly from frontier leftward
       const now = Date.now();
       if (now - lastSpawn > (mob ? 110 : 80) && prog < 1) {
         const spawnLayer = frontier > 0 ? Math.floor(Math.random() * (frontier + 1)) : 0;
-        spawnSignal(Math.min(spawnLayer, LAYERS.length - 2));
+        spawnSignal(Math.min(spawnLayer, nodes.length - 2));
         lastSpawn = now;
       }
 
-      // draw connections
       for (const c of conns) {
         c.active *= 0.88;
         const dimAlpha = 0.05 + Math.min(c.a.depth, c.b.depth) * 0.75;
@@ -344,27 +366,24 @@ function NeuralIntro({ onComplete }) {
         ctx.stroke();
       }
 
-      // advance + draw signals
       for (let i = signals.length - 1; i >= 0; i--) {
         const s = signals[i];
         s.t += s.speed;
         const cx2 = s.x + (s.tx - s.x) * s.t;
         const cy2 = s.y + (s.ty - s.y) * s.t;
+        const bt  = Math.max(0, s.t - 0.09);
 
-        // glowing trail
-        const bt = Math.max(0, s.t - 0.09);
         ctx.beginPath();
         ctx.moveTo(s.x + (s.tx - s.x) * bt, s.y + (s.ty - s.y) * bt);
         ctx.lineTo(cx2, cy2);
         ctx.strokeStyle = s.excitatory
           ? `rgba(230,75,75,${0.95 - s.t * 0.3})`
           : `rgba(75,110,230,${0.95 - s.t * 0.3})`;
-        ctx.lineWidth = 2.8 - s.t * 1.2;
+        ctx.lineWidth = mob ? 1.8 - s.t : 2.8 - s.t * 1.2;
         ctx.stroke();
 
-        // signal dot
         ctx.beginPath();
-        ctx.arc(cx2, cy2, 2.6, 0, Math.PI * 2);
+        ctx.arc(cx2, cy2, mob ? 1.8 : 2.6, 0, Math.PI * 2);
         ctx.fillStyle = s.excitatory ? `rgba(245,85,85,${1 - s.t * 0.2})` : `rgba(85,115,245,${1 - s.t * 0.2})`;
         ctx.fill();
 
@@ -372,32 +391,41 @@ function NeuralIntro({ onComplete }) {
 
         if (s.t >= 1) {
           s.toNode.activation = Math.min(1, s.toNode.activation + 0.75);
-          s.toNode.fire = 1.0; // trigger fire flash
+          s.toNode.fire = 1.0;
+
+          // ← NEW: haptic pop when output neuron fires
+          if (s.layer === nodes.length - 2) {
+            const fireNow = Date.now();
+            if (fireNow - lastFireTime.current > 120) {
+              lastFireTime.current = fireNow;
+              Haptic.pop();
+            }
+          }
+
           signals.splice(i, 1);
-          if (s.layer + 1 < LAYERS.length - 1) spawnSignal(s.layer + 1);
+          if (s.layer + 1 < nodes.length - 1) spawnSignal(s.layer + 1);
         }
       }
 
-      // draw nodes
       nodes.forEach((layer, li) => {
-        const isOut = li === LAYERS.length - 1;
-        const isIn = li === 0;
+        const isOut = li === nodes.length - 1;
+        const isIn  = li === 0;
         layer.forEach((n) => {
           n.activation *= 0.91;
-          n.fire = Math.max(0, n.fire - 0.045); // decay fire flash
+          n.fire = Math.max(0, n.fire - 0.045);
           n.phase += 0.012;
 
           const mDist = Math.hypot(mouseRef.current.x - n.x, mouseRef.current.y - n.y);
           const mouseGlow = Math.max(0, 1 - mDist / 88);
           const effectAct = Math.max(n.activation, n.fire * 0.9, mouseGlow * 0.45);
-          const dim = 0.15 + n.depth * 0.85; // depth-of-field dimming
+          const dim = 0.15 + n.depth * 0.85;
 
-          const baseR = isOut ? 5.5 : isIn ? 4 : 3;
-          const r = baseR + n.activation * 3 + n.fire * 3.5;
+          const baseR = isOut ? (mob ? 3.5 : 5.5) : isIn ? (mob ? 2.8 : 4) : NODE_R_BASE;
+          const r = baseR + n.activation * (mob ? 1.5 : 3) + n.fire * (mob ? 2 : 3.5);
 
-          // glow halo when active
           if (effectAct > 0.06) {
-            const gr = ctx.createRadialGradient(n.x, n.y, r * 0.4, n.x, n.y, r + 20);
+            const glowR = r + (mob ? 10 : 20);
+            const gr = ctx.createRadialGradient(n.x, n.y, r * 0.4, n.x, n.y, glowR);
             gr.addColorStop(0, isOut
               ? `rgba(160,30,30,${effectAct * 0.45 * dim})`
               : n.fire > 0.3
@@ -405,12 +433,11 @@ function NeuralIntro({ onComplete }) {
               : `rgba(200,195,185,${effectAct * 0.26 * dim})`);
             gr.addColorStop(1, "rgba(0,0,0,0)");
             ctx.beginPath();
-            ctx.arc(n.x, n.y, r + 20, 0, Math.PI * 2);
+            ctx.arc(n.x, n.y, glowR, 0, Math.PI * 2);
             ctx.fillStyle = gr;
             ctx.fill();
           }
 
-          // node body
           ctx.beginPath();
           ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
           if (n.fire > 0.2) {
@@ -422,7 +449,6 @@ function NeuralIntro({ onComplete }) {
           }
           ctx.fill();
 
-          // node ring
           ctx.beginPath();
           ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
           ctx.strokeStyle = isOut
@@ -431,7 +457,6 @@ function NeuralIntro({ onComplete }) {
           ctx.lineWidth = 0.5;
           ctx.stroke();
 
-          // specular highlight
           ctx.beginPath();
           ctx.arc(n.x - r * 0.24, n.y - r * 0.24, r * 0.24, 0, Math.PI * 2);
           ctx.fillStyle = `rgba(255,255,255,${(0.22 + mouseGlow * 0.22) * dim})`;
@@ -439,19 +464,17 @@ function NeuralIntro({ onComplete }) {
         });
       });
 
-      // layer labels (desktop only)
       if (!mob) {
         ctx.textAlign = "center";
         ctx.font = `7px ${T.fMono}`;
         nodes.forEach((layer, li) => {
-          const label = li === 0 ? "INPUT" : li === LAYERS.length - 1 ? "OUTPUT" : `H${li}`;
+          const label = li === 0 ? "INPUT" : li === nodes.length - 1 ? "OUTPUT" : `H${li}`;
           const dim = 0.15 + layer[0].depth * 0.4;
           ctx.fillStyle = `rgba(70,60,50,${dim})`;
           ctx.fillText(label, layer[layer.length - 1].x, layer[layer.length - 1].y + 18);
         });
       }
 
-      // trigger output lines once at 100%
       if (prog >= 1 && !linesFired && !doneRef.current) {
         linesFired = true;
         setPhase("output");
@@ -459,8 +482,10 @@ function NeuralIntro({ onComplete }) {
         const addLine = () => {
           if (idx < LINES.length) {
             setOutputLines((p) => [...p, LINES[idx++]]);
-            setTimeout(addLine, mob ? 70 : 95);
+            setTimeout(addLine, mob ? 60 : 95);
           } else {
+            // ← NEW: satisfying done haptic when animation completes
+            Haptic.done();
             setTimeout(() => {
               setPhase("dissolve");
               setTimeout(onComplete, 900);
@@ -483,6 +508,7 @@ function NeuralIntro({ onComplete }) {
   const handleSkip = () => {
     skippedRef.current = true;
     cancelAnimationFrame(rafRef.current);
+    Haptic.pop(); // ← NEW
     setPhase("dissolve");
     setTimeout(onComplete, 500);
   };
@@ -498,7 +524,6 @@ function NeuralIntro({ onComplete }) {
     >
       <canvas ref={canvasRef} style={{ position: "absolute", inset: 0 }} />
 
-      {/* Skip button */}
       <button
         onClick={handleSkip}
         style={{
@@ -507,6 +532,8 @@ function NeuralIntro({ onComplete }) {
           color: T.t3, cursor: "pointer", padding: "6px 14px",
           fontFamily: T.fMono, fontSize: 8, letterSpacing: "0.18em",
           transition: "color 0.2s, border-color 0.2s",
+          // ← NEW: bigger tap target on mobile
+          minWidth: 44, minHeight: 44, display: "flex", alignItems: "center", justifyContent: "center",
         }}
         onMouseEnter={(e) => { e.currentTarget.style.color = T.t0; e.currentTarget.style.borderColor = T.b3; }}
         onMouseLeave={(e) => { e.currentTarget.style.color = T.t3; e.currentTarget.style.borderColor = T.b2; }}
@@ -514,7 +541,6 @@ function NeuralIntro({ onComplete }) {
         SKIP ✕
       </button>
 
-      {/* Top-left label */}
       <div style={{ position: "absolute", top: 14, left: 16, zIndex: 5 }}>
         <div style={{ fontFamily: T.fMono, fontSize: 8, letterSpacing: "0.2em", color: T.t4 }}>
           NEURAL_NET // FORWARD_PASS
@@ -524,7 +550,6 @@ function NeuralIntro({ onComplete }) {
         </div>
       </div>
 
-      {/* Progress counter */}
       <div style={{ position: "absolute", top: 14, right: 80, textAlign: "right", zIndex: 5 }}>
         <div style={{ fontFamily: T.fMono, fontSize: 30, fontWeight: 700, color: T.t0, lineHeight: 1 }}>
           {progress}%
@@ -534,13 +559,14 @@ function NeuralIntro({ onComplete }) {
         </div>
       </div>
 
-      {/* Output lines */}
       {phase === "output" && (
         <div
           style={{
-            position: "absolute", bottom: 24, left: 24, right: 24, zIndex: 2,
-            fontFamily: T.fMono, fontSize: 9, lineHeight: 2.0,
-            maxHeight: "38vh", overflow: "hidden",
+            position: "absolute", bottom: 24, left: 16, right: 16, zIndex: 2,
+            fontFamily: T.fMono,
+            // ← NEW: smaller font on mobile so lines don't overflow
+            fontSize: window.innerWidth <= 768 ? 8 : 9,
+            lineHeight: 2.0, maxHeight: "38vh", overflow: "hidden",
           }}
         >
           {outputLines.map((line, i) => (
