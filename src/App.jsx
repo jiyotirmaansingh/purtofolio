@@ -189,111 +189,380 @@ const STACK_ITEMS = [
 ═══════════════════════════════════════════════════════ */
 function NeuralIntro({ onComplete }) {
   const canvasRef = useRef(null);
-  const [phase, setPhase] = useState("computing");
+  const mouseRef = useRef({ x: 0, y: 0 });
+  const [phase, setPhase] = useState("computing"); // computing | output | dissolve
   const [outputLines, setOutputLines] = useState([]);
   const [progress, setProgress] = useState(0);
   const rafRef = useRef(null);
-  const startRef = useRef(Date.now());
+  const startRef = useRef(null);
   const doneRef = useRef(false);
+  const skippedRef = useRef(false);
 
+  const DURATION = 2600; // ms — total animation time
+  const LAYERS = [3, 5, 8, 10, 8, 5, 3, 1];
   const LINES = [
-    "> INIT_NEURAL_NET...","> LOADING_WEIGHTS: [██████████] 100%","> ARCHITECT: JIYOTIRMAAN_SINGH_v1.0",
-    "> DOMAIN: AI_ML + FULL_STACK","> LEETCODE: GUARDIAN_2168_TOP_1%","> EDGE_DEPLOY: RASPBERRY_PI_CONFIRMED",
-    "> GRAD_CAM: XAI_PIPELINE_ONLINE","> SAMADHAN_2.0: RANK_7_NATIONAL","> FORWARD_PASS: COMPLETE","> OUTPUT: ██ PORTFOLIO_READY ██",
+    "> INIT_NEURAL_NET...",
+    "> LOADING_WEIGHTS: [██████████] 100%",
+    "> ARCHITECT: JIYOTIRMAAN_SINGH_v1.0",
+    "> DOMAIN: AI_ML + FULL_STACK",
+    "> LEETCODE: GUARDIAN_2168_TOP_1%",
+    "> EDGE_DEPLOY: RASPBERRY_PI_CONFIRMED",
+    "> GRAD_CAM: XAI_PIPELINE_ONLINE",
+    "> SAMADHAN_2.0: RANK_7_NATIONAL",
+    "> FORWARD_PASS: COMPLETE",
+    "> OUTPUT: ██ PORTFOLIO_READY ██",
   ];
+
+  // track mouse for parallax
+  useEffect(() => {
+    const handler = (e) => {
+      mouseRef.current = { x: e.clientX, y: e.clientY };
+    };
+    window.addEventListener("mousemove", handler);
+    return () => window.removeEventListener("mousemove", handler);
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
     const mob = window.innerWidth <= 768;
-    const resize = () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; };
-    resize(); window.addEventListener("resize", resize);
-    const W = canvas.width, H = canvas.height;
-    const LAYERS = mob ? [2,4,6,4,2,1] : [3,6,9,12,9,6,3,1];
-    const NODE_SPACING = mob ? 26 : 32;
-    const marginX = W*(mob?0.06:0.09), usableW = W-marginX*2;
-    const layerX = LAYERS.map((_,i) => marginX+(i/(LAYERS.length-1))*usableW);
-    const nodes = LAYERS.map((count,li) => {
-      const totalH=(count-1)*NODE_SPACING, startY=H/2-totalH/2;
-      return Array.from({length:count},(_,ni)=>({x:layerX[li],y:startY+ni*NODE_SPACING,activation:0,phase:Math.random()*Math.PI*2}));
-    });
-    const conns=[]; for(let li=0;li<LAYERS.length-1;li++) for(const a of nodes[li]) for(const b of nodes[li+1]) conns.push({a,b,w:0.025+Math.random()*0.055,active:0,sign:Math.random()>0.5?1:-1});
-    const signals=[];
-    const spawnSignal=(li)=>{
-      if(li>=LAYERS.length-1)return;
-      const from=nodes[li][Math.floor(Math.random()*nodes[li].length)];
-      const to=nodes[li+1][Math.floor(Math.random()*nodes[li+1].length)];
-      const conn=conns.find(c=>c.a===from&&c.b===to);
-      signals.push({x:from.x,y:from.y,tx:to.x,ty:to.y,t:0,speed:(mob?0.028:0.02)+Math.random()*0.016,layer:li,toNode:to,conn});
+
+    const resize = () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
     };
-    let frame=0; const DURATION=mob?4.2:5.5, SPAWN_RATE=mob?7:4;
-    const draw=()=>{
-      frame++;
-      const elapsed=(Date.now()-startRef.current)/1000, prog=Math.min(elapsed/DURATION,1);
-      setProgress(Math.round(prog*100));
-      ctx.fillStyle="rgba(8,8,8,0.22)"; ctx.fillRect(0,0,W,H);
-      for(const c of conns){
-        c.active*=0.90; const alpha=c.w+c.active*0.4;
-        ctx.beginPath(); ctx.moveTo(c.a.x,c.a.y); ctx.lineTo(c.b.x,c.b.y);
-        if(c.active>0.05){ctx.strokeStyle=c.sign>0?`rgba(180,45,45,${alpha*1.2})`:`rgba(45,80,180,${alpha*1.2})`;ctx.lineWidth=0.5+c.active*0.7;}
-        else{ctx.strokeStyle=`rgba(55,55,55,${c.w*1.4})`;ctx.lineWidth=0.35;}
+    resize();
+    window.addEventListener("resize", resize);
+
+    const W = () => canvas.width;
+    const H = () => canvas.height;
+
+    // build node grid
+    const NODE_SPACING = mob ? 30 : 44;
+    const buildNodes = () => {
+      const w = W(), h = H();
+      const layerSpacing = w / (LAYERS.length + 1);
+      return LAYERS.map((count, li) => {
+        const totalH = (count - 1) * NODE_SPACING;
+        const startY = h / 2 - totalH / 2;
+        const x = layerSpacing * (li + 1);
+        // depth: 0 = outermost (dimmed), 1 = centre (bright)
+        const depth = 1 - Math.abs(li - (LAYERS.length - 1) / 2) / ((LAYERS.length - 1) / 2);
+        return Array.from({ length: count }, (_, ni) => ({
+          x, y: startY + ni * NODE_SPACING,
+          baseX: x, baseY: startY + ni * NODE_SPACING,
+          activation: 0, fire: 0, phase: Math.random() * Math.PI * 2,
+          depth, layer: li,
+        }));
+      });
+    };
+
+    let nodes = buildNodes();
+
+    const buildConns = () => {
+      const cs = [];
+      for (let li = 0; li < LAYERS.length - 1; li++)
+        for (const a of nodes[li])
+          for (const b of nodes[li + 1])
+            cs.push({ a, b, active: 0, sign: Math.random() > 0.5 ? 1 : -1, w: 0.02 + Math.random() * 0.04 });
+      return cs;
+    };
+    let conns = buildConns();
+
+    window.addEventListener("resize", () => {
+      nodes = buildNodes();
+      conns = buildConns();
+    });
+
+    const signals = [];
+    let lastSpawn = 0;
+
+    const spawnSignal = (fromLayer) => {
+      if (fromLayer >= LAYERS.length - 1) return;
+      const from = nodes[fromLayer][Math.floor(Math.random() * nodes[fromLayer].length)];
+      const to = nodes[fromLayer + 1][Math.floor(Math.random() * nodes[fromLayer + 1].length)];
+      const conn = conns.find((c) => c.a === from && c.b === to);
+      signals.push({
+        x: from.x, y: from.y, tx: to.x, ty: to.y,
+        t: 0, speed: 0.028 + Math.random() * 0.018,
+        layer: fromLayer, toNode: to, conn,
+        excitatory: conn ? conn.sign > 0 : true,
+      });
+    };
+
+    let linesFired = false;
+
+    const draw = (ts) => {
+      if (!startRef.current) startRef.current = ts;
+      const elapsed = skippedRef.current ? DURATION + 1 : ts - startRef.current;
+      const prog = Math.min(elapsed / DURATION, 1);
+      setProgress(Math.round(prog * 100));
+
+      // parallax offset — inner layers move more
+      const cx = W() / 2, cy = H() / 2;
+      const mx = mouseRef.current.x - cx;
+      const my = mouseRef.current.y - cy;
+
+      ctx.fillStyle = "rgba(8,8,8,0.22)";
+      ctx.fillRect(0, 0, W(), H());
+
+      // frontier layer advances L→R with progress
+      const frontier = Math.floor(prog * (LAYERS.length - 1));
+
+      // update node positions (parallax)
+      nodes.forEach((layer) =>
+        layer.forEach((n) => {
+          n.x = n.baseX + mx * 0.016 * n.depth;
+          n.y = n.baseY + my * 0.010 * n.depth;
+        })
+      );
+
+      // spawn signals strictly from frontier leftward
+      const now = Date.now();
+      if (now - lastSpawn > (mob ? 110 : 80) && prog < 1) {
+        const spawnLayer = frontier > 0 ? Math.floor(Math.random() * (frontier + 1)) : 0;
+        spawnSignal(Math.min(spawnLayer, LAYERS.length - 2));
+        lastSpawn = now;
+      }
+
+      // draw connections
+      for (const c of conns) {
+        c.active *= 0.88;
+        const dimAlpha = 0.05 + Math.min(c.a.depth, c.b.depth) * 0.75;
+        const isActive = c.active > 0.05;
+        ctx.beginPath();
+        ctx.moveTo(c.a.x, c.a.y);
+        ctx.lineTo(c.b.x, c.b.y);
+        if (isActive) {
+          const alpha = Math.min(dimAlpha + c.active * 0.55, 1);
+          ctx.strokeStyle = c.sign > 0 ? `rgba(180,45,45,${alpha})` : `rgba(50,85,200,${alpha})`;
+          ctx.lineWidth = 0.4 + c.active * 0.9;
+        } else {
+          ctx.strokeStyle = `rgba(48,48,48,${dimAlpha * c.w * 7})`;
+          ctx.lineWidth = 0.3;
+        }
         ctx.stroke();
       }
-      for(let i=signals.length-1;i>=0;i--){
-        const s=signals[i]; s.t+=s.speed;
-        const cx=s.x+(s.tx-s.x)*s.t,cy=s.y+(s.ty-s.y)*s.t;
-        ctx.beginPath();ctx.arc(cx,cy,2.2,0,Math.PI*2);ctx.fillStyle=`rgba(230,70,70,${1-s.t*0.25})`;ctx.fill();
-        const bt=Math.max(0,s.t-0.05);
-        ctx.beginPath();ctx.arc(s.x+(s.tx-s.x)*bt,s.y+(s.ty-s.y)*bt,1.0,0,Math.PI*2);ctx.fillStyle="rgba(200,50,50,0.28)";ctx.fill();
-        if(s.conn)s.conn.active=Math.min(1,s.conn.active+0.55);
-        if(s.t>=1){s.toNode.activation=Math.min(1,s.toNode.activation+0.55);signals.splice(i,1);if(s.layer+1<LAYERS.length-1)spawnSignal(s.layer+1);}
+
+      // advance + draw signals
+      for (let i = signals.length - 1; i >= 0; i--) {
+        const s = signals[i];
+        s.t += s.speed;
+        const cx2 = s.x + (s.tx - s.x) * s.t;
+        const cy2 = s.y + (s.ty - s.y) * s.t;
+
+        // glowing trail
+        const bt = Math.max(0, s.t - 0.09);
+        ctx.beginPath();
+        ctx.moveTo(s.x + (s.tx - s.x) * bt, s.y + (s.ty - s.y) * bt);
+        ctx.lineTo(cx2, cy2);
+        ctx.strokeStyle = s.excitatory
+          ? `rgba(230,75,75,${0.95 - s.t * 0.3})`
+          : `rgba(75,110,230,${0.95 - s.t * 0.3})`;
+        ctx.lineWidth = 2.8 - s.t * 1.2;
+        ctx.stroke();
+
+        // signal dot
+        ctx.beginPath();
+        ctx.arc(cx2, cy2, 2.6, 0, Math.PI * 2);
+        ctx.fillStyle = s.excitatory ? `rgba(245,85,85,${1 - s.t * 0.2})` : `rgba(85,115,245,${1 - s.t * 0.2})`;
+        ctx.fill();
+
+        if (s.conn) s.conn.active = Math.min(1, s.conn.active + 0.65);
+
+        if (s.t >= 1) {
+          s.toNode.activation = Math.min(1, s.toNode.activation + 0.75);
+          s.toNode.fire = 1.0; // trigger fire flash
+          signals.splice(i, 1);
+          if (s.layer + 1 < LAYERS.length - 1) spawnSignal(s.layer + 1);
+        }
       }
-      if(frame%SPAWN_RATE===0)spawnSignal(0);
-      if(frame%(SPAWN_RATE*3)===0)spawnSignal(Math.floor(Math.random()*(LAYERS.length-2)));
-      nodes.forEach((layer,li)=>{
-        const isOut=li===LAYERS.length-1,isIn=li===0;
-        layer.forEach(n=>{
-          n.activation*=0.93;n.phase+=0.015;const pulse=0.5+0.5*Math.sin(n.phase);
-          const baseR=isOut?5.5:isIn?3.5:2.8,r=baseR+n.activation*2.8;
-          if(n.activation>0.08){const grad=ctx.createRadialGradient(n.x,n.y,r*0.5,n.x,n.y,r+10);grad.addColorStop(0,`rgba(160,30,30,${n.activation*0.22})`);grad.addColorStop(1,"rgba(0,0,0,0)");ctx.beginPath();ctx.arc(n.x,n.y,r+10,0,Math.PI*2);ctx.fillStyle=grad;ctx.fill();}
-          ctx.beginPath();ctx.arc(n.x,n.y,r,0,Math.PI*2);
-          ctx.fillStyle=isOut?`rgba(170,35,35,${0.55+n.activation*0.45})`:`rgba(200,195,185,${0.15+n.activation*0.5+pulse*0.04})`;ctx.fill();
-          ctx.beginPath();ctx.arc(n.x,n.y,r,0,Math.PI*2);
-          ctx.strokeStyle=isOut?`rgba(210,65,65,${0.4+n.activation*0.5})`:`rgba(110,105,95,${0.2+n.activation*0.35})`;ctx.lineWidth=0.5;ctx.stroke();
-          ctx.beginPath();ctx.arc(n.x-r*0.22,n.y-r*0.22,r*0.22,0,Math.PI*2);ctx.fillStyle=`rgba(255,255,255,${0.28+pulse*0.12+n.activation*0.25})`;ctx.fill();
+
+      // draw nodes
+      nodes.forEach((layer, li) => {
+        const isOut = li === LAYERS.length - 1;
+        const isIn = li === 0;
+        layer.forEach((n) => {
+          n.activation *= 0.91;
+          n.fire = Math.max(0, n.fire - 0.045); // decay fire flash
+          n.phase += 0.012;
+
+          const mDist = Math.hypot(mouseRef.current.x - n.x, mouseRef.current.y - n.y);
+          const mouseGlow = Math.max(0, 1 - mDist / 88);
+          const effectAct = Math.max(n.activation, n.fire * 0.9, mouseGlow * 0.45);
+          const dim = 0.15 + n.depth * 0.85; // depth-of-field dimming
+
+          const baseR = isOut ? 5.5 : isIn ? 4 : 3;
+          const r = baseR + n.activation * 3 + n.fire * 3.5;
+
+          // glow halo when active
+          if (effectAct > 0.06) {
+            const gr = ctx.createRadialGradient(n.x, n.y, r * 0.4, n.x, n.y, r + 20);
+            gr.addColorStop(0, isOut
+              ? `rgba(160,30,30,${effectAct * 0.45 * dim})`
+              : n.fire > 0.3
+              ? `rgba(230,80,80,${effectAct * 0.35 * dim})`
+              : `rgba(200,195,185,${effectAct * 0.26 * dim})`);
+            gr.addColorStop(1, "rgba(0,0,0,0)");
+            ctx.beginPath();
+            ctx.arc(n.x, n.y, r + 20, 0, Math.PI * 2);
+            ctx.fillStyle = gr;
+            ctx.fill();
+          }
+
+          // node body
+          ctx.beginPath();
+          ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+          if (n.fire > 0.2) {
+            ctx.fillStyle = `rgba(235,85,85,${(0.5 + n.fire * 0.5) * dim})`;
+          } else if (isOut) {
+            ctx.fillStyle = `rgba(170,35,35,${(0.5 + n.activation * 0.5) * dim})`;
+          } else {
+            ctx.fillStyle = `rgba(200,195,185,${(0.1 + n.activation * 0.5 + mouseGlow * 0.28) * dim})`;
+          }
+          ctx.fill();
+
+          // node ring
+          ctx.beginPath();
+          ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+          ctx.strokeStyle = isOut
+            ? `rgba(210,65,65,${(0.35 + n.fire * 0.5) * dim})`
+            : `rgba(110,105,95,${(0.14 + n.activation * 0.3) * dim})`;
+          ctx.lineWidth = 0.5;
+          ctx.stroke();
+
+          // specular highlight
+          ctx.beginPath();
+          ctx.arc(n.x - r * 0.24, n.y - r * 0.24, r * 0.24, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255,255,255,${(0.22 + mouseGlow * 0.22) * dim})`;
+          ctx.fill();
         });
       });
-      if(!mob){ctx.textAlign="center";ctx.font="7.5px 'Space Mono',monospace";nodes.forEach((layer,li)=>{const label=li===0?"INPUT":li===LAYERS.length-1?"OUTPUT":`H${li}`;ctx.fillStyle="rgba(80,70,60,0.5)";ctx.fillText(label,layerX[li],layer[layer.length-1].y+18);});}
-      if(prog<1){rafRef.current=requestAnimationFrame(draw);}
-      else if(!doneRef.current){
-        doneRef.current=true;setPhase("output");let idx=0;
-        const addLine=()=>{if(idx<LINES.length){setOutputLines(p=>[...p,LINES[idx++]]);setTimeout(addLine,mob?75:105);}else{setTimeout(()=>setPhase("dissolve"),400);setTimeout(onComplete,1050);}};
+
+      // layer labels (desktop only)
+      if (!mob) {
+        ctx.textAlign = "center";
+        ctx.font = `7px ${T.fMono}`;
+        nodes.forEach((layer, li) => {
+          const label = li === 0 ? "INPUT" : li === LAYERS.length - 1 ? "OUTPUT" : `H${li}`;
+          const dim = 0.15 + layer[0].depth * 0.4;
+          ctx.fillStyle = `rgba(70,60,50,${dim})`;
+          ctx.fillText(label, layer[layer.length - 1].x, layer[layer.length - 1].y + 18);
+        });
+      }
+
+      // trigger output lines once at 100%
+      if (prog >= 1 && !linesFired && !doneRef.current) {
+        linesFired = true;
+        setPhase("output");
+        let idx = 0;
+        const addLine = () => {
+          if (idx < LINES.length) {
+            setOutputLines((p) => [...p, LINES[idx++]]);
+            setTimeout(addLine, mob ? 70 : 95);
+          } else {
+            setTimeout(() => {
+              setPhase("dissolve");
+              setTimeout(onComplete, 900);
+            }, 350);
+          }
+        };
         addLine();
       }
+
+      rafRef.current = requestAnimationFrame(draw);
     };
-    rafRef.current=requestAnimationFrame(draw);
-    return()=>{cancelAnimationFrame(rafRef.current);window.removeEventListener("resize",resize);};
-  },[]);
+
+    rafRef.current = requestAnimationFrame(draw);
+    return () => {
+      cancelAnimationFrame(rafRef.current);
+      window.removeEventListener("resize", resize);
+    };
+  }, []);
+
+  const handleSkip = () => {
+    skippedRef.current = true;
+    cancelAnimationFrame(rafRef.current);
+    setPhase("dissolve");
+    setTimeout(onComplete, 500);
+  };
 
   return (
-    <div style={{position:"fixed",inset:0,zIndex:9999,background:T.bg0,overflow:"hidden",opacity:phase==="dissolve"?0:1,transform:phase==="dissolve"?"scale(1.03)":"scale(1)",transition:phase==="dissolve"?"opacity 0.8s ease,transform 0.8s ease":"none"}}>
-      <canvas ref={canvasRef} style={{position:"absolute",inset:0}} />
-      <div style={{position:"relative",zIndex:2,padding:"22px 24px",display:"flex",justifyContent:"space-between"}}>
-        <div>
-          <div style={{fontFamily:T.fMono,fontSize:8,letterSpacing:"0.2em",color:T.t4}}>NEURAL_NET // FORWARD_PASS</div>
-          <div style={{fontFamily:T.fMono,fontSize:9,letterSpacing:"0.12em",color:T.red,marginTop:3}}>JIYOTIRMAAN.SYS</div>
+    <div
+      style={{
+        position: "fixed", inset: 0, zIndex: 9999, background: T.bg0, overflow: "hidden",
+        opacity: phase === "dissolve" ? 0 : 1,
+        transform: phase === "dissolve" ? "scale(1.04)" : "scale(1)",
+        transition: phase === "dissolve" ? "opacity 0.85s ease, transform 0.85s ease" : "none",
+      }}
+    >
+      <canvas ref={canvasRef} style={{ position: "absolute", inset: 0 }} />
+
+      {/* Skip button */}
+      <button
+        onClick={handleSkip}
+        style={{
+          position: "absolute", top: 14, right: 16, zIndex: 10,
+          background: "rgba(12,12,12,0.85)", border: `1px solid ${T.b2}`,
+          color: T.t3, cursor: "pointer", padding: "6px 14px",
+          fontFamily: T.fMono, fontSize: 8, letterSpacing: "0.18em",
+          transition: "color 0.2s, border-color 0.2s",
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.color = T.t0; e.currentTarget.style.borderColor = T.b3; }}
+        onMouseLeave={(e) => { e.currentTarget.style.color = T.t3; e.currentTarget.style.borderColor = T.b2; }}
+      >
+        SKIP ✕
+      </button>
+
+      {/* Top-left label */}
+      <div style={{ position: "absolute", top: 14, left: 16, zIndex: 5 }}>
+        <div style={{ fontFamily: T.fMono, fontSize: 8, letterSpacing: "0.2em", color: T.t4 }}>
+          NEURAL_NET // FORWARD_PASS
         </div>
-        <div style={{textAlign:"right"}}>
-          <div style={{fontFamily:T.fMono,fontSize:30,fontWeight:700,color:T.t0,lineHeight:1}}>{progress}%</div>
-          <div style={{fontFamily:T.fMono,fontSize:7,letterSpacing:"0.2em",color:T.t4,marginTop:2}}>COMPUTING</div>
+        <div style={{ fontFamily: T.fMono, fontSize: 9, letterSpacing: "0.12em", color: T.red, marginTop: 3 }}>
+          JIYOTIRMAAN.SYS
         </div>
       </div>
-      {phase==="output"&&(
-        <div style={{position:"absolute",bottom:24,left:24,right:24,zIndex:2,fontFamily:T.fMono,fontSize:9,lineHeight:2.0,maxHeight:"38vh",overflow:"hidden"}}>
-          {outputLines.map((line,i)=>(<div key={i} style={{color:i===outputLines.length-1?T.redL:T.t4,animation:"nn-fade 0.1s ease"}}>{line}</div>))}
+
+      {/* Progress counter */}
+      <div style={{ position: "absolute", top: 14, right: 80, textAlign: "right", zIndex: 5 }}>
+        <div style={{ fontFamily: T.fMono, fontSize: 30, fontWeight: 700, color: T.t0, lineHeight: 1 }}>
+          {progress}%
+        </div>
+        <div style={{ fontFamily: T.fMono, fontSize: 7, letterSpacing: "0.2em", color: T.t4, marginTop: 2 }}>
+          COMPUTING
+        </div>
+      </div>
+
+      {/* Output lines */}
+      {phase === "output" && (
+        <div
+          style={{
+            position: "absolute", bottom: 24, left: 24, right: 24, zIndex: 2,
+            fontFamily: T.fMono, fontSize: 9, lineHeight: 2.0,
+            maxHeight: "38vh", overflow: "hidden",
+          }}
+        >
+          {outputLines.map((line, i) => (
+            <div
+              key={i}
+              style={{
+                color: i === outputLines.length - 1 ? T.redL : T.t4,
+                animation: "nn-fade 0.1s ease",
+              }}
+            >
+              {line}
+            </div>
+          ))}
         </div>
       )}
-      <style>{`@keyframes nn-fade{from{opacity:0;transform:translateX(-4px)}to{opacity:1;transform:none}}`}</style>
+
+      <style>{`
+        @keyframes nn-fade {
+          from { opacity: 0; transform: translateX(-5px); }
+          to   { opacity: 1; transform: none; }
+        }
+      `}</style>
     </div>
   );
 }
@@ -1002,7 +1271,7 @@ export default function App() {
             <div className="footer-bar" style={{background:T.red,padding:"18px 44px 14px",overflow:"hidden"}}>
               <div style={{fontFamily:T.fBebas,fontSize:"clamp(32px,6vw,84px)",lineHeight:1,letterSpacing:"-0.02em",color:"#0A0A0A",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>JIYOTIRMAAN SINGH</div>
               <div style={{display:"flex",flexWrap:"wrap",gap:18,borderTop:"1px solid rgba(0,0,0,0.2)",marginTop:11,paddingTop:11}}>
-                {["AI/ML ENGINEER · FULL-STACK DEV","LNCT GROUP · BHOPAL","OPEN TO INTERNSHIP","REACT + VITE · 2025"].map((t,i)=>(
+                {["AI/ML ENGINEER · FULL-STACK DEV","LNCT GROUP · BHOPAL","OPEN TO INTERNSHIP"].map((t,i)=>(
                   <div key={i} className="lbl" style={{color:"rgba(0,0,0,0.38)",fontSize:7.5}}>{t}</div>
                 ))}
               </div>
