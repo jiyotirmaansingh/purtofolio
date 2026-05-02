@@ -17,14 +17,6 @@ function downloadResume() {
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-
-const Haptic = {
-  tap:    () => navigator.vibrate?.(6),
-  burst:  () => navigator.vibrate?.([4, 20, 4]),
-  pop:    () => navigator.vibrate?.([8, 12, 4]),
-  done:   () => navigator.vibrate?.([10, 18, 6, 18, 14]),
-};
-
 /* ═══════════════════════════════════════════════════════
    DESIGN TOKENS — single source of truth
 ═══════════════════════════════════════════════════════ */
@@ -192,10 +184,10 @@ const STACK_ITEMS = [
 ];
 
 /* ═══════════════════════════════════════════════════════
-   NEURAL INTRO
+   NEURAL INTRO (Troll Edition)
 ═══════════════════════════════════════════════════════ */
 /* ═══════════════════════════════════════════════════════
-   NEURAL INTRO (Troll Edition)
+   NEURAL INTRO (Haptic-Free Edition)
 ═══════════════════════════════════════════════════════ */
 function NeuralIntro({ onComplete }) {
   const canvasRef = useRef(null);
@@ -208,10 +200,7 @@ function NeuralIntro({ onComplete }) {
   const startRef = useRef(null);
   const doneRef = useRef(false);
   const skippedRef = useRef(false);
-  const lastHapticProgress = useRef(0);
-  const lastFireTime = useRef(0);
 
-  // --- NEW: Fleeing Button Logic ---
   const [btnPos, setBtnPos] = useState({ x: 0, y: 0 });
   const [isFleeing, setIsFleeing] = useState(false);
   const skipBtnRef = useRef(null);
@@ -235,20 +224,17 @@ function NeuralIntro({ onComplete }) {
     const onMouse = (e) => {
       mouseRef.current = { x: e.clientX, y: e.clientY };
       
-      // Cat & Mouse Logic
       if (skipBtnRef.current && !isFleeing) {
         const rect = skipBtnRef.current.getBoundingClientRect();
         const btnCenterX = rect.left + rect.width / 2;
         const btnCenterY = rect.top + rect.height / 2;
         const dist = Math.hypot(e.clientX - btnCenterX, e.clientY - btnCenterY);
 
-        if (dist < 100) { // If mouse gets within 100px
+        if (dist < 100) { 
           setIsFleeing(true);
           const newX = Math.random() * (window.innerWidth - 100) - (window.innerWidth / 2 - 50);
           const newY = Math.random() * (window.innerHeight - 100) - (window.innerHeight / 2 - 50);
           setBtnPos({ x: newX, y: newY });
-          
-          // Small cooldown so it doesn't jump infinitely in one frame
           setTimeout(() => setIsFleeing(false), 100);
         }
       }
@@ -258,7 +244,6 @@ function NeuralIntro({ onComplete }) {
       const t = e.touches[0];
       touchRef.current = { x: t.clientX, y: t.clientY };
       mouseRef.current = { x: t.clientX, y: t.clientY };
-      if (typeof Haptic !== 'undefined') Haptic.tap();
     };
 
     window.addEventListener("mousemove", onMouse);
@@ -341,12 +326,6 @@ function NeuralIntro({ onComplete }) {
       const prog = Math.min(elapsed / DURATION, 1);
       setProgress(Math.round(prog * 100));
 
-      const pct = Math.round(prog * 100);
-      if ([25, 50, 75].includes(pct) && pct !== lastHapticProgress.current) {
-        lastHapticProgress.current = pct;
-        if (typeof Haptic !== 'undefined') Haptic.burst();
-      }
-
       const cx = W() / 2, cy = H() / 2;
       const mx = mouseRef.current.x - cx;
       const my = mouseRef.current.y - cy;
@@ -411,15 +390,6 @@ function NeuralIntro({ onComplete }) {
         if (s.t >= 1) {
           s.toNode.activation = Math.min(1, s.toNode.activation + 0.75);
           s.toNode.fire = 1.0;
-
-          if (s.layer === nodes.length - 2) {
-            const fireNow = Date.now();
-            if (fireNow - lastFireTime.current > 120) {
-              lastFireTime.current = fireNow;
-              if (typeof Haptic !== 'undefined') Haptic.pop();
-            }
-          }
-
           signals.splice(i, 1);
           if (s.layer + 1 < nodes.length - 1) spawnSignal(s.layer + 1);
         }
@@ -480,7 +450,6 @@ function NeuralIntro({ onComplete }) {
             setOutputLines((p) => [...p, LINES[idx++]]);
             setTimeout(addLine, mob ? 60 : 95);
           } else {
-            if (typeof Haptic !== 'undefined') Haptic.done();
             setTimeout(() => {
               setPhase("dissolve");
               setTimeout(onComplete, 900);
@@ -503,7 +472,6 @@ function NeuralIntro({ onComplete }) {
   const handleSkip = () => {
     skippedRef.current = true;
     cancelAnimationFrame(rafRef.current);
-    if (typeof Haptic !== 'undefined') Haptic.pop();
     setPhase("dissolve");
     setTimeout(onComplete, 500);
   };
@@ -519,11 +487,9 @@ function NeuralIntro({ onComplete }) {
         opacity: phase === "dissolve" ? 0 : 1,
         transform: phase === "dissolve" ? "scale(1.04)" : "scale(1)",
         transition: phase === "dissolve" ? "opacity 0.85s ease, transform 0.85s ease" : "none",
-        // Force the cursor to show up regardless of global settings
-        cursor: 'default', 
+        cursor: 'default',
       }}
     >
-      {/* Added pointerEvents: none so the canvas doesn't hide the cursor */}
       <canvas 
         ref={canvasRef} 
         style={{ 
@@ -533,7 +499,6 @@ function NeuralIntro({ onComplete }) {
         }} 
       />
 
-      {/* --- REPOSITIONED & FLEEING SKIP BUTTON --- */}
       <div 
         style={{
           position: "absolute", 
@@ -563,8 +528,8 @@ function NeuralIntro({ onComplete }) {
             display: "flex", 
             alignItems: "center", 
             justifyContent: "center",
-            pointerEvents: 'auto', // Button stays interactive
-            cursor: 'pointer',     // Force hand icon on hover (if they can catch it)
+            pointerEvents: 'auto',
+            cursor: 'pointer',
             transform: `translate(${btnPos.x}px, ${btnPos.y}px)`,
           }}
           onMouseEnter={(e) => { 
@@ -620,14 +585,12 @@ function NeuralIntro({ onComplete }) {
           from { opacity: 0; transform: translateX(-5px); }
           to   { opacity: 1; transform: none; }
         }
-        /* Global override for this specific component */
         canvas, div { cursor: default !important; }
         button { cursor: pointer !important; }
       `}</style>
     </div>
   );
 }
-
 /* ═══════════════════════════════════════════════════════
    CASE STUDY MODAL
    — sticky close button always visible on mobile
