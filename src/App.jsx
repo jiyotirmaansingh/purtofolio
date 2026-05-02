@@ -194,10 +194,13 @@ const STACK_ITEMS = [
 /* ═══════════════════════════════════════════════════════
    NEURAL INTRO
 ═══════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════
+   NEURAL INTRO (Troll Edition)
+═══════════════════════════════════════════════════════ */
 function NeuralIntro({ onComplete }) {
   const canvasRef = useRef(null);
   const mouseRef = useRef({ x: 0, y: 0 });
-  const touchRef = useRef({ x: 0, y: 0 }); // ← NEW
+  const touchRef = useRef({ x: 0, y: 0 });
   const [phase, setPhase] = useState("computing");
   const [outputLines, setOutputLines] = useState([]);
   const [progress, setProgress] = useState(0);
@@ -205,8 +208,13 @@ function NeuralIntro({ onComplete }) {
   const startRef = useRef(null);
   const doneRef = useRef(false);
   const skippedRef = useRef(false);
-  const lastHapticProgress = useRef(0); // ← NEW
-  const lastFireTime = useRef(0);       // ← NEW
+  const lastHapticProgress = useRef(0);
+  const lastFireTime = useRef(0);
+
+  // --- NEW: Fleeing Button Logic ---
+  const [btnPos, setBtnPos] = useState({ x: 0, y: 0 });
+  const [isFleeing, setIsFleeing] = useState(false);
+  const skipBtnRef = useRef(null);
 
   const DURATION = 2600;
   const LAYERS = [3, 5, 8, 10, 8, 5, 3, 1];
@@ -224,22 +232,42 @@ function NeuralIntro({ onComplete }) {
   ];
 
   useEffect(() => {
-    // mouse (desktop)
-    const onMouse = (e) => { mouseRef.current = { x: e.clientX, y: e.clientY }; };
-    // touch (mobile) — also drives parallax ← NEW
+    const onMouse = (e) => {
+      mouseRef.current = { x: e.clientX, y: e.clientY };
+      
+      // Cat & Mouse Logic
+      if (skipBtnRef.current && !isFleeing) {
+        const rect = skipBtnRef.current.getBoundingClientRect();
+        const btnCenterX = rect.left + rect.width / 2;
+        const btnCenterY = rect.top + rect.height / 2;
+        const dist = Math.hypot(e.clientX - btnCenterX, e.clientY - btnCenterY);
+
+        if (dist < 100) { // If mouse gets within 100px
+          setIsFleeing(true);
+          const newX = Math.random() * (window.innerWidth - 100) - (window.innerWidth / 2 - 50);
+          const newY = Math.random() * (window.innerHeight - 100) - (window.innerHeight / 2 - 50);
+          setBtnPos({ x: newX, y: newY });
+          
+          // Small cooldown so it doesn't jump infinitely in one frame
+          setTimeout(() => setIsFleeing(false), 100);
+        }
+      }
+    };
+
     const onTouch = (e) => {
       const t = e.touches[0];
       touchRef.current = { x: t.clientX, y: t.clientY };
       mouseRef.current = { x: t.clientX, y: t.clientY };
-      Haptic.tap(); // tiny tick on every touch move ← NEW
+      if (typeof Haptic !== 'undefined') Haptic.tap();
     };
+
     window.addEventListener("mousemove", onMouse);
     window.addEventListener("touchmove", onTouch, { passive: true });
     return () => {
       window.removeEventListener("mousemove", onMouse);
       window.removeEventListener("touchmove", onTouch);
     };
-  }, []);
+  }, [isFleeing]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -256,16 +284,12 @@ function NeuralIntro({ onComplete }) {
     const W = () => canvas.width;
     const H = () => canvas.height;
 
-    // ← NEW: tighter node spacing on mobile so the network isn't fat
     const NODE_SPACING = mob ? 22 : 44;
     const NODE_R_BASE  = mob ? 2.2 : 3.5;
 
     const buildNodes = () => {
       const w = W(), h = H();
-      // ← NEW: on mobile shrink layer count so it fits portrait
-      const activeLayers = mob
-        ? [2, 4, 6, 8, 6, 4, 2, 1]
-        : LAYERS;
+      const activeLayers = mob ? [2, 4, 6, 8, 6, 4, 2, 1] : LAYERS;
       const layerSpacing = w / (activeLayers.length + 1);
       return activeLayers.map((count, li) => {
         const totalH = (count - 1) * NODE_SPACING;
@@ -282,7 +306,6 @@ function NeuralIntro({ onComplete }) {
     };
 
     let nodes = buildNodes();
-
     const buildConns = () => {
       const cs = [];
       for (let li = 0; li < nodes.length - 1; li++)
@@ -318,11 +341,10 @@ function NeuralIntro({ onComplete }) {
       const prog = Math.min(elapsed / DURATION, 1);
       setProgress(Math.round(prog * 100));
 
-      // ← NEW: haptic ticks at 25% / 50% / 75% milestones
       const pct = Math.round(prog * 100);
       if ([25, 50, 75].includes(pct) && pct !== lastHapticProgress.current) {
         lastHapticProgress.current = pct;
-        Haptic.burst();
+        if (typeof Haptic !== 'undefined') Haptic.burst();
       }
 
       const cx = W() / 2, cy = H() / 2;
@@ -351,11 +373,10 @@ function NeuralIntro({ onComplete }) {
       for (const c of conns) {
         c.active *= 0.88;
         const dimAlpha = 0.05 + Math.min(c.a.depth, c.b.depth) * 0.75;
-        const isActive = c.active > 0.05;
         ctx.beginPath();
         ctx.moveTo(c.a.x, c.a.y);
         ctx.lineTo(c.b.x, c.b.y);
-        if (isActive) {
+        if (c.active > 0.05) {
           const alpha = Math.min(dimAlpha + c.active * 0.55, 1);
           ctx.strokeStyle = c.sign > 0 ? `rgba(180,45,45,${alpha})` : `rgba(50,85,200,${alpha})`;
           ctx.lineWidth = 0.4 + c.active * 0.9;
@@ -376,9 +397,7 @@ function NeuralIntro({ onComplete }) {
         ctx.beginPath();
         ctx.moveTo(s.x + (s.tx - s.x) * bt, s.y + (s.ty - s.y) * bt);
         ctx.lineTo(cx2, cy2);
-        ctx.strokeStyle = s.excitatory
-          ? `rgba(230,75,75,${0.95 - s.t * 0.3})`
-          : `rgba(75,110,230,${0.95 - s.t * 0.3})`;
+        ctx.strokeStyle = s.excitatory ? `rgba(230,75,75,${0.95 - s.t * 0.3})` : `rgba(75,110,230,${0.95 - s.t * 0.3})`;
         ctx.lineWidth = mob ? 1.8 - s.t : 2.8 - s.t * 1.2;
         ctx.stroke();
 
@@ -393,12 +412,11 @@ function NeuralIntro({ onComplete }) {
           s.toNode.activation = Math.min(1, s.toNode.activation + 0.75);
           s.toNode.fire = 1.0;
 
-          // ← NEW: haptic pop when output neuron fires
           if (s.layer === nodes.length - 2) {
             const fireNow = Date.now();
             if (fireNow - lastFireTime.current > 120) {
               lastFireTime.current = fireNow;
-              Haptic.pop();
+              if (typeof Haptic !== 'undefined') Haptic.pop();
             }
           }
 
@@ -426,11 +444,7 @@ function NeuralIntro({ onComplete }) {
           if (effectAct > 0.06) {
             const glowR = r + (mob ? 10 : 20);
             const gr = ctx.createRadialGradient(n.x, n.y, r * 0.4, n.x, n.y, glowR);
-            gr.addColorStop(0, isOut
-              ? `rgba(160,30,30,${effectAct * 0.45 * dim})`
-              : n.fire > 0.3
-              ? `rgba(230,80,80,${effectAct * 0.35 * dim})`
-              : `rgba(200,195,185,${effectAct * 0.26 * dim})`);
+            gr.addColorStop(0, isOut ? `rgba(160,30,30,${effectAct * 0.45 * dim})` : n.fire > 0.3 ? `rgba(230,80,80,${effectAct * 0.35 * dim})` : `rgba(200,195,185,${effectAct * 0.26 * dim})`);
             gr.addColorStop(1, "rgba(0,0,0,0)");
             ctx.beginPath();
             ctx.arc(n.x, n.y, glowR, 0, Math.PI * 2);
@@ -451,29 +465,11 @@ function NeuralIntro({ onComplete }) {
 
           ctx.beginPath();
           ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
-          ctx.strokeStyle = isOut
-            ? `rgba(210,65,65,${(0.35 + n.fire * 0.5) * dim})`
-            : `rgba(110,105,95,${(0.14 + n.activation * 0.3) * dim})`;
+          ctx.strokeStyle = isOut ? `rgba(210,65,65,${(0.35 + n.fire * 0.5) * dim})` : `rgba(110,105,95,${(0.14 + n.activation * 0.3) * dim})`;
           ctx.lineWidth = 0.5;
           ctx.stroke();
-
-          ctx.beginPath();
-          ctx.arc(n.x - r * 0.24, n.y - r * 0.24, r * 0.24, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(255,255,255,${(0.22 + mouseGlow * 0.22) * dim})`;
-          ctx.fill();
         });
       });
-
-      if (!mob) {
-        ctx.textAlign = "center";
-        ctx.font = `7px ${T.fMono}`;
-        nodes.forEach((layer, li) => {
-          const label = li === 0 ? "INPUT" : li === nodes.length - 1 ? "OUTPUT" : `H${li}`;
-          const dim = 0.15 + layer[0].depth * 0.4;
-          ctx.fillStyle = `rgba(70,60,50,${dim})`;
-          ctx.fillText(label, layer[layer.length - 1].x, layer[layer.length - 1].y + 18);
-        });
-      }
 
       if (prog >= 1 && !linesFired && !doneRef.current) {
         linesFired = true;
@@ -484,8 +480,7 @@ function NeuralIntro({ onComplete }) {
             setOutputLines((p) => [...p, LINES[idx++]]);
             setTimeout(addLine, mob ? 60 : 95);
           } else {
-            // ← NEW: satisfying done haptic when animation completes
-            Haptic.done();
+            if (typeof Haptic !== 'undefined') Haptic.done();
             setTimeout(() => {
               setPhase("dissolve");
               setTimeout(onComplete, 900);
@@ -503,12 +498,12 @@ function NeuralIntro({ onComplete }) {
       cancelAnimationFrame(rafRef.current);
       window.removeEventListener("resize", resize);
     };
-  }, []);
+  }, [isFleeing]);
 
   const handleSkip = () => {
     skippedRef.current = true;
     cancelAnimationFrame(rafRef.current);
-    Haptic.pop(); // ← NEW
+    if (typeof Haptic !== 'undefined') Haptic.pop();
     setPhase("dissolve");
     setTimeout(onComplete, 500);
   };
@@ -516,30 +511,74 @@ function NeuralIntro({ onComplete }) {
   return (
     <div
       style={{
-        position: "fixed", inset: 0, zIndex: 9999, background: T.bg0, overflow: "hidden",
+        position: "fixed", 
+        inset: 0, 
+        zIndex: 9999, 
+        background: T.bg0, 
+        overflow: "hidden",
         opacity: phase === "dissolve" ? 0 : 1,
         transform: phase === "dissolve" ? "scale(1.04)" : "scale(1)",
         transition: phase === "dissolve" ? "opacity 0.85s ease, transform 0.85s ease" : "none",
+        // Force the cursor to show up regardless of global settings
+        cursor: 'default', 
       }}
     >
-      <canvas ref={canvasRef} style={{ position: "absolute", inset: 0 }} />
+      {/* Added pointerEvents: none so the canvas doesn't hide the cursor */}
+      <canvas 
+        ref={canvasRef} 
+        style={{ 
+          position: "absolute", 
+          inset: 0, 
+          pointerEvents: 'none' 
+        }} 
+      />
 
-      <button
-        onClick={handleSkip}
+      {/* --- REPOSITIONED & FLEEING SKIP BUTTON --- */}
+      <div 
         style={{
-          position: "absolute", top: 14, right: 16, zIndex: 10,
-          background: "rgba(12,12,12,0.85)", border: `1px solid ${T.b2}`,
-          color: T.t3, cursor: "pointer", padding: "6px 14px",
-          fontFamily: T.fMono, fontSize: 8, letterSpacing: "0.18em",
-          transition: "color 0.2s, border-color 0.2s",
-          // ← NEW: bigger tap target on mobile
-          minWidth: 44, minHeight: 44, display: "flex", alignItems: "center", justifyContent: "center",
+          position: "absolute", 
+          bottom: "15%", 
+          left: 0, 
+          right: 0, 
+          display: 'flex', 
+          justifyContent: 'center', 
+          zIndex: 10,
+          pointerEvents: 'none' 
         }}
-        onMouseEnter={(e) => { e.currentTarget.style.color = T.t0; e.currentTarget.style.borderColor = T.b3; }}
-        onMouseLeave={(e) => { e.currentTarget.style.color = T.t3; e.currentTarget.style.borderColor = T.b2; }}
       >
-        SKIP ✕
-      </button>
+        <button
+          ref={skipBtnRef}
+          onClick={handleSkip}
+          style={{
+            background: "rgba(12,12,12,0.85)", 
+            border: `1px solid ${T.b2}`,
+            color: T.t3, 
+            padding: "6px 14px",
+            fontFamily: T.fMono, 
+            fontSize: 8, 
+            letterSpacing: "0.18em",
+            transition: isFleeing ? "transform 0.1s ease-out" : "transform 0.4s ease, color 0.2s, border-color 0.2s",
+            minWidth: 44, 
+            minHeight: 44, 
+            display: "flex", 
+            alignItems: "center", 
+            justifyContent: "center",
+            pointerEvents: 'auto', // Button stays interactive
+            cursor: 'pointer',     // Force hand icon on hover (if they can catch it)
+            transform: `translate(${btnPos.x}px, ${btnPos.y}px)`,
+          }}
+          onMouseEnter={(e) => { 
+            e.currentTarget.style.color = T.t0; 
+            e.currentTarget.style.borderColor = T.b3; 
+          }}
+          onMouseLeave={(e) => { 
+            e.currentTarget.style.color = T.t3; 
+            e.currentTarget.style.borderColor = T.b2; 
+          }}
+        >
+          SKIP ✕
+        </button>
+      </div>
 
       <div style={{ position: "absolute", top: 14, left: 16, zIndex: 5 }}>
         <div style={{ fontFamily: T.fMono, fontSize: 8, letterSpacing: "0.2em", color: T.t4 }}>
@@ -550,7 +589,7 @@ function NeuralIntro({ onComplete }) {
         </div>
       </div>
 
-      <div style={{ position: "absolute", top: 14, right: 80, textAlign: "right", zIndex: 5 }}>
+      <div style={{ position: "absolute", top: 14, right: 16, textAlign: "right", zIndex: 5 }}>
         <div style={{ fontFamily: T.fMono, fontSize: 30, fontWeight: 700, color: T.t0, lineHeight: 1 }}>
           {progress}%
         </div>
@@ -564,19 +603,12 @@ function NeuralIntro({ onComplete }) {
           style={{
             position: "absolute", bottom: 24, left: 16, right: 16, zIndex: 2,
             fontFamily: T.fMono,
-            // ← NEW: smaller font on mobile so lines don't overflow
             fontSize: window.innerWidth <= 768 ? 8 : 9,
             lineHeight: 2.0, maxHeight: "38vh", overflow: "hidden",
           }}
         >
           {outputLines.map((line, i) => (
-            <div
-              key={i}
-              style={{
-                color: i === outputLines.length - 1 ? T.redL : T.t4,
-                animation: "nn-fade 0.1s ease",
-              }}
-            >
+            <div key={i} style={{ color: i === outputLines.length - 1 ? T.redL : T.t4, animation: "nn-fade 0.1s ease" }}>
               {line}
             </div>
           ))}
@@ -588,6 +620,9 @@ function NeuralIntro({ onComplete }) {
           from { opacity: 0; transform: translateX(-5px); }
           to   { opacity: 1; transform: none; }
         }
+        /* Global override for this specific component */
+        canvas, div { cursor: default !important; }
+        button { cursor: pointer !important; }
       `}</style>
     </div>
   );
